@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Configuration;
 using System.Diagnostics;
 using System.IO;
@@ -82,6 +83,8 @@ namespace LogentriesCore.Net
         //static list of all the queues the le appender might be managing.
         private static ConcurrentBag<BlockingCollection<string>> _allQueues = new ConcurrentBag<BlockingCollection<string>>();
 
+        public static Action<string, Exception> LogLogWatcher;
+
         /// <summary>
         /// Determines if the queue is empty after waiting the specified waitTime.
         /// Returns true or false if the underlying queues are empty.
@@ -121,6 +124,7 @@ namespace LogentriesCore.Net
         private String m_Token = "";
         private String m_AccountKey = "";
         private String m_Location = "";
+        private String m_LogPath = "";
         private bool m_ImmediateFlush = false;
         public bool m_Debug = false;
         private bool m_UseHttpPut = false;
@@ -197,6 +201,17 @@ namespace LogentriesCore.Net
         public String getLocation()
         {
             return m_Location;
+        }
+
+
+        public void setLogPath(string value)
+        {
+            m_LogPath = value;
+        }
+
+        public string getLogPath()
+        {
+            return m_LogPath;
         }
 
         public void setImmediateFlush(bool immediateFlush)
@@ -385,6 +400,54 @@ namespace LogentriesCore.Net
             catch (ThreadInterruptedException ex)
             {
                 WriteDebugMessages("Logentries asynchronous socket client was interrupted.", ex);
+            }
+        }
+
+        private string getLogTokenFromApi() {
+            if (string.IsNullOrWhiteSpace(m_LogPath)) {
+                return null;
+            }
+
+            try
+            {
+                var logParts = m_LogPath.Split('/');
+                var logLocationName = logParts[0];
+                var logName = logParts[1];
+                var webclient = new System.Net.WebClient();
+
+                var hostsString = webclient.DownloadString("https://api.logentries.com/" + m_AccountKey + "/hosts/");
+                dynamic hostsJson = Newtonsoft.Json.JsonConvert.DeserializeObject(hostsString);
+
+                string unsortedLogToken = null;
+
+                var logEntriesHost = ((IEnumerable<dynamic>)hostsJson.list).FirstOrDefault(host => host.name == logLocationName);
+                var logEntriesLog = ((IEnumerable<dynamic>)logEntriesHost.logs).
+                    Select(log =>
+                    {
+                        var logString = webclient.DownloadString("https://api.logentries.com/0073e479-21b7-44ae-887c-847de3121790/logs/" + log.key);
+                        dynamic logJson = Newtonsoft.Json.JsonConvert.DeserializeObject(logString);
+
+                        var name = (string)logJson.name;
+                        var token = (string)logJson.token;
+
+                        if (name == "Unsorted")
+                        {
+                            unsortedLogToken = token;
+                        }
+
+                        return new
+                        {
+                            Name = name,
+                            Token = token
+                        };
+                    }).
+                    FirstOrDefault(log => log.Name == logName);
+                return logEntriesLog != null ? logEntriesLog.Token : unsortedLogToken;
+            }
+            catch (Exception ex) {
+                var logLog = LogLogWatcher;
+                logLog("Failed to get token for log path " + m_LogPath, ex);
+                return null;
             }
         }
 

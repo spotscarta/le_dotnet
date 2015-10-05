@@ -13,8 +13,8 @@ namespace log4net.Appender
     {
         private AsyncLogger logentriesAsync;
 
-        public LogentriesAppender()
-        {
+        public LogentriesAppender() {
+            AsyncLogger.LogLogWatcher += (message, ex) => { log4net.Util.LogLog.Error(typeof(LogentriesAppender), message, ex); };
             logentriesAsync = new AsyncLogger();
         }
 
@@ -58,6 +58,19 @@ namespace log4net.Appender
                 logentriesAsync.setLocation(value);
             }
         }
+
+        public String LogPath
+        {
+            get
+            {
+                return logentriesAsync.getLogPath();
+            }
+            set
+            {
+                logentriesAsync.setLogPath(value);
+            }
+        }
+
 
         /* Set to true to always flush the TCP stream after every written entry. */
         public bool ImmediateFlush
